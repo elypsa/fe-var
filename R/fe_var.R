@@ -94,6 +94,7 @@ fe_var <- function(Y,
   Sigma0 <- Sigma
   bet0 <- bet
   bet_bs_smp <- array(dim = c(Ny * lags, Ny, nboot))
+  sigma_bs_smp <- array(dim = c(Ny, Ny, nboot))
   res <- sweep(res, 2, colMeans(res, na.rm = TRUE))  # Detrend residuals
 
   conv_test <- 10
@@ -114,6 +115,8 @@ fe_var <- function(Y,
       X_temp <- cbind(Xb, D[, 1:(Nfe - 1)], 1)
       bet_tmp <- solve(t(X_temp) %*% X_temp) %*% t(X_temp) %*% Yb
       bet_bs_smp[, , i] <- bet_tmp[1:(Ny * lags), ]
+      res_temp <- Yb - X_temp %*% bet_tmp
+      sigma_bs_smp[, , i] <- t(res_temp) %*% (res_temp) / (NT - Nx)
     }
     betbs_mean <- apply(bet_bs_smp, c(1, 2), mean)
     diff <- bet0[1:(Ny * lags), ] - betbs_mean
@@ -126,19 +129,19 @@ fe_var <- function(Y,
       bet_bs <- bet_bs + delta_update * diff
     }
     if (conv_test < tol || iter == maxit) {
-      # construct IRF to bootstrap CI using bet_bs_smp
-      # TBD = Sigma should be recalculated !!!!!!!!!!!!!!
       virf_boot <- array(0, dim = c(irf_hor, Ny, Ny, nboot))
       for (j in 1:nboot) {
-        virf_boot[, , , j] <- irf(bet_bs_smp[, , j], Sigma0, perm, irf_hor, normalize, lags)
+        virf_boot[, , , j] <- irf(bet_bs_smp[, , j], sigma_bs_smp[, , j] , perm, irf_hor, normalize, lags)
       }
       # calculate CI using conf_levels
       low <- (100 - conf_levels) / 200
       high <- 1 - low
       virf_conf_intervals <- apply(virf_boot, c(1, 2, 3), function(x) {
-        quantile(x, probs = c(low, high), na.rm = TRUE)
-      }) # first dimension is according to confidence level(s)
-      virf <- list(probs = c(low, high), intervals = virf_conf_intervals)
+        quantile(x, probs = c(low, high), na.rm = TRUE)})
+      virf_mean <- apply(virf_boot, c(1, 2, 3), mean)
+       # first dimension is according to confidence level(s)
+      virf <- list(probs = c(low, high), intervals = virf_conf_intervals,
+                   virf_mean = virf_mean, virf_boot = virf_boot)
     }
   }
   bc_diff <- bet[1:(Ny * lags), ] - bet_bs
@@ -153,7 +156,7 @@ fe_var <- function(Y,
   sigma_bc <- t(res_bc) %*% res_bc / (NT - Nx)
   res <- res_bc
 
-  virf$mean <- irf(bet_bc, sigma_bc, perm, irf_hor, normalize, lags)
+  # virf$mean <- irf(bet_bc, sigma_bc, perm, irf_hor, normalize, lags)
 
   return(list(
     bet0 = bet0,
